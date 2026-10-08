@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Privacy Scanner</title>
+<style>
+  :root {
+    --bg: #0f172a;
+    --panel: #1e293b;
+    --border: #334155;
+    --text: #f1f5f9;
+    --dim: #94a3b8;
+    --red: #d81e05;
+    --yellow: #f7b500;
+    --green: #22c55e;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: system-ui, sans-serif;
+    display: flex;
+    justify-content: center;
+    padding: 2rem 1rem;
+  }
+  .container { width: 100%; max-width: 640px; }
+  h1 { font-size: 1.6rem; margin-bottom: 0.2rem; }
+  p.subtitle { color: var(--dim); margin-top: 0; }
+  form { display: flex; gap: 0.5rem; margin: 1.5rem 0; }
+  input[type=text] {
+    flex: 1;
+    padding: 0.7rem 1rem;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--panel);
+    color: var(--text);
+    font-size: 1rem;
+  }
+  button {
+    padding: 0.7rem 1.4rem;
+    border-radius: 8px;
+    border: none;
+    background: var(--yellow);
+    color: #0f172a;
+    font-weight: 700;
+    cursor: pointer;
+  }
+  button:disabled { opacity: 0.5; cursor: wait; }
+
+  #result { display: none; }
+  .score-card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 1.5rem;
+    display: flex;
+    align-items: center;
+    gap: 1.5rem;
+    margin-bottom: 1.5rem;
+  }
+  .grade-circle {
+    width: 80px; height: 80px;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 2rem; font-weight: 800;
+    flex-shrink: 0;
+  }
+  .score-details h2 { margin: 0 0 0.2rem 0; font-size: 1.1rem; word-break: break-all; }
+  .score-details p { margin: 0; color: var(--dim); }
+
+  .tracker-list { list-style: none; padding: 0; margin: 0; }
+  .tracker-item {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 0.7rem 1rem;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    margin-bottom: 0.5rem;
+  }
+  .tracker-company { font-weight: 600; }
+  .tracker-domain { color: var(--dim); font-size: 0.85rem; }
+  .category-badge {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    font-weight: 700;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: var(--border);
+    color: var(--text);
+  }
+  .empty-trackers { color: var(--green); padding: 1rem; text-align: center; }
+  .error-box {
+    background: #3f1212;
+    border: 1px solid var(--red);
+    border-radius: 8px;
+    padding: 1rem;
+    display: none;
+  }
+  .note {
+    color: var(--dim);
+    font-size: 0.8rem;
+    margin-top: 2rem;
+    line-height: 1.5;
+  }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>🔍 Privacy Scanner</h1>
+  <p class="subtitle">Paste a URL — see which companies are watching, before you visit.</p>
+
+  <form id="scan-form">
+    <input type="text" id="url-input" placeholder="example.com" autocomplete="off" required>
+    <button type="submit" id="scan-btn">Scan</button>
+  </form>
+
+  <div class="error-box" id="error-box"></div>
+
+  <div id="result">
+    <div class="score-card">
+      <div class="grade-circle" id="grade-circle">A</div>
+      <div class="score-details">
+        <h2 id="result-url"></h2>
+        <p id="result-summary"></p>
+      </div>
+    </div>
+    <ul class="tracker-list" id="tracker-list"></ul>
+  </div>
+
+  <p class="note">
+    This only looks at the page's initial HTML (script/img/iframe/link tags) —
+    it doesn't run JavaScript, so trackers loaded dynamically by other scripts
+    won't show up here. Treat the score as a useful signal, not a complete audit.
+  </p>
+</div>
+
+<script>
+const form = document.getElementById('scan-form');
+const input = document.getElementById('url-input');
+const btn = document.getElementById('scan-btn');
+const errorBox = document.getElementById('error-box');
+const result = document.getElementById('result');
+const gradeCircle = document.getElementById('grade-circle');
+const resultUrl = document.getElementById('result-url');
+const resultSummary = document.getElementById('result-summary');
+const trackerList = document.getElementById('tracker-list');
+
+const GRADE_COLORS = {
+  A: '#22c55e', B: '#84cc16', C: '#f7b500', D: '#f97316', F: '#d81e05',
+};
+
+form.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  errorBox.style.display = 'none';
+  result.style.display = 'none';
+  btn.disabled = true;
+  btn.textContent = 'Scanning…';
+
+  try {
+    const res = await fetch('/api/scan', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url: input.value }),
+    });
+    const data = await res.json();
+
+    if (!res.ok) {
+      throw new Error(data.detail || 'Something went wrong.');
+    }
+
+    renderResult(data);
+  } catch (err) {
+    errorBox.textContent = err.message;
+    errorBox.style.display = 'block';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Scan';
+  }
+});
+
+function renderResult(data) {
+  gradeCircle.textContent = data.grade;
+  gradeCircle.style.background = GRADE_COLORS[data.grade] || '#94a3b8';
+  gradeCircle.style.color = (data.grade === 'A' || data.grade === 'B') ? '#0f172a' : '#0f172a';
+
+  resultUrl.textContent = data.url;
+  resultSummary.textContent =
+    `Score ${data.score}/100 — ${data.tracker_count} tracker(s) from ${data.unique_companies} compan${data.unique_companies === 1 ? 'y' : 'ies'}`;
+
+  trackerList.innerHTML = '';
+  if (data.trackers.length === 0) {
+    trackerList.innerHTML = '<li class="empty-trackers">✓ No known trackers found in the page markup.</li>';
+  } else {
+    for (const t of data.trackers) {
+      const li = document.createElement('li');
+      li.className = 'tracker-item';
+      li.innerHTML = `
+        <div>
+          <div class="tracker-company">${escapeHtml(t.company)}</div>
+          <div class="tracker-domain">${escapeHtml(t.domain)}</div>
+        </div>
+        <span class="category-badge">${escapeHtml(t.category)}</span>
+      `;
+      trackerList.appendChild(li);
+    }
+  }
+
+  result.style.display = 'block';
+}
+
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+</script>
+</body>
+</html>
